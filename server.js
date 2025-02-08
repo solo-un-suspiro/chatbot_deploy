@@ -7,23 +7,29 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
-const db = mysql.createConnection({
+// Create a connection pool instead of a single connection
+const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
-  password: "Q~Z#PZbNz]4",
+  password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT || 3306,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
   ssl: {
     rejectUnauthorized: false,
   },
 })
 
-db.connect((err) => {
+// Test the pool connection
+pool.getConnection((err, connection) => {
   if (err) {
     console.error("Error connecting to the database:", err)
     return
   }
   console.log("Connected to the database")
+  connection.release()
 })
 
 const menuOptions = [
@@ -33,11 +39,10 @@ const menuOptions = [
   { id: 4, text: "Conocer más sobre Nexwey Services", keyword: "nexwey" },
 ]
 
-// Función para guardar el mensaje del usuario
+// Función para guardar el mensaje del usuario usando el pool
 const saveUserMessage = (message) => {
   return new Promise((resolve, reject) => {
-    const query = "INSERT INTO user_messages (message) VALUES (?)"
-    db.query(query, [message], (err, result) => {
+    pool.query("INSERT INTO user_messages (message) VALUES (?)", [message], (err, result) => {
       if (err) {
         console.error("Error al guardar el mensaje del usuario:", err)
         reject(err)
@@ -48,7 +53,7 @@ const saveUserMessage = (message) => {
   })
 }
 
-// Función para obtener respuesta basada en palabras clave
+// Función para obtener respuesta basada en palabras clave usando el pool
 const getResponse = (message) => {
   return new Promise((resolve, reject) => {
     const query = `
@@ -58,14 +63,13 @@ const getResponse = (message) => {
       WHERE LOWER(?) LIKE CONCAT('%', LOWER(k.keyword), '%')
     `
 
-    db.query(query, [message], (err, results) => {
+    pool.query(query, [message], (err, results) => {
       if (err) {
         reject(err)
         return
       }
 
       if (results.length > 0) {
-        // Formatea el contenido para incluir saltos de línea
         let formattedContent = results[0].content.replace(/\\r\\n/g, "\n")
         formattedContent = formattedContent.replace(/\\n/g, "\n")
         resolve(formattedContent)
@@ -81,7 +85,6 @@ app.post("/api/chat", async (req, res) => {
   const { message } = req.body
 
   try {
-    // Guardar el mensaje del usuario
     await saveUserMessage(message)
 
     let response
@@ -123,8 +126,9 @@ app.post("/api/quote", (req, res) => {
     VALUES (?, ?, ?, ?, ?)
   `
 
-  db.query(query, [name, email, phone, description, requestDate], (err, result) => {
+  pool.query(query, [name, email, phone, description, requestDate], (err, result) => {
     if (err) {
+      console.error("Error al guardar la cotización:", err)
       res.status(500).json({ error: "Error al guardar la solicitud de cotización" })
       return
     }
